@@ -8,7 +8,13 @@ from typing import TypeAlias, overload
 import httpx2
 
 from pydantic_ai import ModelProfile
-from pydantic_ai._http import AsyncHTTPClient, create_async_httpx2_client
+from pydantic_ai._http import (
+    AsyncHTTPClient,
+    LegacyHttpxAsyncClient,
+    create_async_httpx2_client,
+    legacy_httpx,
+    warn_if_legacy_httpx_client,
+)
 from pydantic_ai.profiles import merge_profile
 from pydantic_ai.profiles.anthropic import AnthropicModelProfile, anthropic_model_profile
 from pydantic_ai.providers import Provider, missing_api_key_error
@@ -29,6 +35,14 @@ except ImportError as _import_error:
         'Please install the `anthropic` package to use the Anthropic provider, '
         'you can use the `anthropic` optional group — `pip install "pydantic-ai-slim[anthropic]"`'
     ) from _import_error
+
+# TODO(v3): remove, along with the legacy `httpx.AsyncClient` support.
+def _as_httpx2_client(http_client: AsyncHTTPClient) -> httpx2.AsyncClient:
+    """Hand the SDK an `httpx2.AsyncClient`, wrapping a legacy `httpx.AsyncClient` in a delegating facade."""
+    if legacy_httpx is not None and isinstance(http_client, legacy_httpx.AsyncClient):
+        return LegacyHttpxAsyncClient(http_client)
+    return http_client
+
 
 AsyncAnthropicClient: TypeAlias = (
     AsyncAnthropic | AsyncAnthropicBedrock | AsyncAnthropicBedrockMantle | AsyncAnthropicFoundry | AsyncAnthropicVertex
@@ -119,7 +133,7 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
 
     @overload
     def __init__(
-        self, *, api_key: str | None = None, base_url: str | None = None, http_client: httpx2.AsyncClient | None = None
+        self, *, api_key: str | None = None, base_url: str | None = None, http_client: AsyncHTTPClient | None = None
     ) -> None: ...
 
     def __init__(
@@ -128,7 +142,7 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
         api_key: str | None = None,
         base_url: str | None = None,
         anthropic_client: AsyncAnthropicClient | None = None,
-        http_client: httpx2.AsyncClient | None = None,
+        http_client: AsyncHTTPClient | None = None,
     ) -> None:
         """Create a new Anthropic provider.
 
@@ -143,7 +157,9 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
                 [`AsyncAnthropicFoundry`](https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry), or
                 [`AsyncAnthropicVertex`](https://docs.anthropic.com/en/api/claude-on-vertex-ai).
                 If provided, the `api_key` and `http_client` arguments will be ignored.
-            http_client: An existing `httpx2.AsyncClient` to use for making HTTP requests.
+            http_client: An existing `httpx2.AsyncClient` to use for making HTTP requests. A legacy
+                `httpx.AsyncClient` is also accepted during Pydantic AI v2, with a deprecation warning: the
+                `anthropic` SDK rejects it, so requests are routed through it via an `httpx2` facade instead.
         """
         if anthropic_client is not None:
             assert http_client is None, 'Cannot provide both `anthropic_client` and `http_client`'
@@ -157,7 +173,10 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
                     ' to use the Anthropic provider.'
                 )
             if http_client is not None:
-                self._client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)
+                warn_if_legacy_httpx_client(http_client, consumer='the Anthropic provider', stacklevel=2)
+                self._client = AsyncAnthropic(
+                    api_key=api_key, base_url=base_url, http_client=_as_httpx2_client(http_client)
+                )
             else:
                 http_client = create_async_httpx2_client()
                 self._own_http_client = http_client

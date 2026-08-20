@@ -83,7 +83,7 @@ agent = Agent(model)
 ...
 ```
 
-Unlike the OpenAI-compatible providers, the Anthropic provider does not accept a legacy `httpx.AsyncClient`: the `anthropic` SDK (1.x) is built on [`httpx2`](https://httpx2.pydantic.dev/) and rejects it.
+The Anthropic provider also accepts a legacy `httpx.AsyncClient` during Pydantic AI v2, but emits a deprecation warning. The `anthropic` SDK itself only takes an `httpx2.AsyncClient`, so requests are routed through your legacy client via an `httpx2` facade; everything configured on it (proxies, certificates, event hooks) keeps applying. Use `httpx2.AsyncClient` for new code; legacy HTTPX client support will be removed in Pydantic AI v3.
 
 ## Model settings
 
