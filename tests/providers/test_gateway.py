@@ -24,7 +24,7 @@ with try_import() as imports_successful:
     from pydantic_ai.models.groq import GroqModel
     from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
     from pydantic_ai.providers import Provider
-    from pydantic_ai.providers.anthropic import AnthropicProvider
+    from pydantic_ai.providers.anthropic import AnthropicProvider, anthropic_uses_httpx2
     from pydantic_ai.providers.bedrock import BedrockProvider
     from pydantic_ai.providers.gateway import (
         _set_google_ws_gateway_auth,  # pyright: ignore[reportPrivateUsage]
@@ -101,6 +101,7 @@ async def test_gateway_google_preserves_caller_owned_httpx2_client():
         assert not http_client.is_closed
 
 
+@pytest.mark.skipif(not (imports_successful() and anthropic_uses_httpx2()), reason='anthropic is not on httpx2')
 async def test_gateway_anthropic_preserves_caller_owned_httpx2_client():
     async with httpx2.AsyncClient() as http_client:
         provider = gateway_provider('anthropic', http_client=http_client, api_key='gw-key', base_url=GATEWAY_BASE_URL)
@@ -110,6 +111,7 @@ async def test_gateway_anthropic_preserves_caller_owned_httpx2_client():
         assert not http_client.is_closed
 
 
+@pytest.mark.skipif(not (imports_successful() and anthropic_uses_httpx2()), reason='anthropic is not on httpx2')
 async def test_gateway_anthropic_recreates_owned_httpx2_client():
     provider = gateway_provider('anthropic', api_key='gw-key', base_url=GATEWAY_BASE_URL)
     first_client = provider.client._client  # pyright: ignore[reportPrivateUsage]

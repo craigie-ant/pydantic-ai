@@ -9565,7 +9565,7 @@ async def test_anthropic_output_tool_with_thinking(
 ):
     m = AnthropicModel(
         'claude-sonnet-4-0',
-        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.httpx2_client),
+        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.anthropic_client),
         settings=AnthropicModelSettings(anthropic_thinking={'type': 'enabled', 'budget_tokens': 3000}),
     )
 
@@ -11407,7 +11407,7 @@ async def test_anthropic_memory_tool(
 ):
     anthropic_model = AnthropicModel(
         'claude-sonnet-4-5',
-        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.httpx2_client),
+        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.anthropic_client),
         settings=AnthropicModelSettings(extra_headers={'anthropic-beta': 'context-1m-2025-08-07'}),
     )
     agent = Agent(anthropic_model, capabilities=[NativeTool(MemoryTool())])

@@ -83,7 +83,7 @@ with try_import() as openai_available:
 
 with try_import() as anthropic_available:
     from pydantic_ai.models.anthropic import AnthropicModel
-    from pydantic_ai.providers.anthropic import AnthropicProvider
+    from pydantic_ai.providers.anthropic import AnthropicProvider, anthropic_uses_httpx2
 
 with try_import() as google_available:
     from pydantic_ai.models.google import GoogleModel
@@ -499,7 +499,7 @@ def _bedrock_mantle_responses(client: httpx2.AsyncClient) -> Model:
     )
 
 
-def _anthropic(client: httpx2.AsyncClient) -> Model:
+def _anthropic(client: httpx.AsyncClient | httpx2.AsyncClient) -> Model:
     return AnthropicModel('claude-sonnet-4-5', provider=AnthropicProvider(api_key=PROBE_KEY, http_client=client))
 
 
@@ -545,7 +545,12 @@ CASES = [
         http_probe(_bedrock_mantle_responses),
         _needs(openai_available, 'openai'),
     ),
-    Case('AnthropicModel', ('Anthropic',), http_probe(_anthropic), _needs(anthropic_available, 'anthropic')),
+    Case(
+        'AnthropicModel',
+        ('Anthropic',),
+        http_probe(_anthropic) if anthropic_available() and anthropic_uses_httpx2() else legacy_http_probe(_anthropic),
+        _needs(anthropic_available, 'anthropic'),
+    ),
     Case('GroqModel', ('Groq',), legacy_http_probe(_groq), _needs(groq_available, 'groq')),
     Case('MistralModel', ('Mistral',), http_probe(_mistral), _needs(mistral_available, 'mistral')),
     Case('CohereModel', ('Cohere',), legacy_http_probe(_cohere), _needs(cohere_available, 'cohere')),
