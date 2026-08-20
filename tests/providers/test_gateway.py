@@ -241,11 +241,11 @@ async def test_init_with_http_client_replaces_existing_gateway_hook():
         assert request.headers['Authorization'] == 'Bearer second'
 
 
-@pytest.mark.parametrize('provider_name', ['openai', 'google-cloud'])
+@pytest.mark.parametrize('provider_name', ['openai', 'google-cloud', 'anthropic'])
 async def test_gateway_provider_hooks_a_caller_owned_legacy_http_client(
-    provider_name: Literal['openai', 'google-cloud'],
+    provider_name: Literal['openai', 'google-cloud', 'anthropic'],
 ):
-    # Unit (not VCR): the OpenAI and Google routes default to HTTPX2 but still accept the deprecated
+    # Unit (not VCR): the OpenAI, Google and Anthropic routes default to HTTPX2 but still accept the deprecated
     # `httpx.AsyncClient` through v2, and a missing auth hook on it would fail silently (every gateway
     # request 401s) rather than at construction. Invoking the hooks directly pins that they were installed;
     # cassette playback wouldn't exercise hook installation.

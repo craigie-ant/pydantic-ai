@@ -9,6 +9,8 @@ from ..conftest import TestEnv, try_import
 with try_import() as imports_successful:
     from anthropic import AsyncAnthropic, AsyncAnthropicBedrock
 
+    from pydantic_ai._http import LegacyHttpxAsyncClient
+    from pydantic_ai._warnings import PydanticAIDeprecationWarning
     from pydantic_ai.exceptions import UserError
     from pydantic_ai.native_tools import SUPPORTED_NATIVE_TOOLS
     from pydantic_ai.native_tools._tool_search import ToolSearchTool
@@ -42,12 +44,47 @@ async def test_anthropic_provider_pass_httpx2_client() -> None:
         assert not http_client.is_closed
 
 
-async def test_anthropic_provider_rejects_legacy_httpx_client() -> None:
-    # Unlike the OpenAI SDK, `anthropic>=1` has no runtime escape hatch for a legacy client, so there is
-    # no deprecation path to offer: the SDK itself refuses it at construction.
-    async with httpx.AsyncClient() as http_client:
-        with pytest.raises(TypeError, match=r'Expected an instance of `httpx2\.AsyncClient`'):
-            AnthropicProvider(http_client=http_client, api_key='api-key')  # pyright: ignore[reportArgumentType]
+async def test_anthropic_provider_deprecates_legacy_httpx_client() -> None:
+    # Unlike the OpenAI SDK, `anthropic>=1` refuses a legacy client outright, so the provider wraps it in an
+    # `httpx2` facade that delegates the I/O back to it — the caller's transport keeps serving the requests.
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                'id': 'msg',
+                'type': 'message',
+                'role': 'assistant',
+                'model': 'claude-sonnet-4-5',
+                'content': [{'type': 'text', 'text': 'hello'}],
+                'stop_reason': 'end_turn',
+                'stop_sequence': None,
+                'usage': {'input_tokens': 1, 'output_tokens': 1},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        with pytest.warns(
+            PydanticAIDeprecationWarning,
+            match=r'`httpx\.AsyncClient`.*removed in v3.*`httpx2\.AsyncClient`',
+        ) as warnings:
+            provider = AnthropicProvider(http_client=http_client, api_key='api-key')
+        assert warnings[0].filename == __file__
+        assert isinstance(provider.client._client, LegacyHttpxAsyncClient)  # pyright: ignore[reportPrivateUsage]
+        assert provider.client._client.legacy_client is http_client  # pyright: ignore[reportPrivateUsage]
+
+        message = await provider.client.messages.create(
+            model='claude-sonnet-4-5', max_tokens=5, messages=[{'role': 'user', 'content': 'hi'}]
+        )
+        assert message.content[0].type == 'text' and message.content[0].text == 'hello'
+        assert [str(request.url) for request in seen] == ['https://api.anthropic.com/v1/messages']
+        assert seen[0].headers['x-api-key'] == 'api-key'
+
+        async with provider:
+            pass
+        assert not http_client.is_closed
 
 
 def test_anthropic_provider_without_api_key_raises_error(env: TestEnv):
