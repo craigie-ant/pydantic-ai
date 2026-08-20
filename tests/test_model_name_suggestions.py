@@ -21,7 +21,7 @@ with try_import() as openai_imports:
 
 with try_import() as anthropic_imports:
     from pydantic_ai.models.anthropic import AnthropicModel
-    from pydantic_ai.providers.anthropic import AnthropicProvider
+    from pydantic_ai.providers.anthropic import AnthropicProvider, anthropic_uses_httpx2
 
 with try_import() as google_imports:
     from pydantic_ai.models.google import GoogleModel
@@ -189,8 +189,9 @@ async def test_model_name_suggestion(case: Case, request: pytest.FixtureRequest,
                 model = OpenAIChatModel(case.model_name, provider=openai_provider)
         elif case.provider == 'anthropic':
             api_key: str = request.getfixturevalue('anthropic_api_key')
+            client_cls = httpx2.AsyncClient if anthropic_uses_httpx2() else httpx.AsyncClient
             http_client = await stack.enter_async_context(
-                httpx2.AsyncClient(event_hooks={'request': [capture_model_request]})
+                client_cls(event_hooks={'request': [capture_model_request]})
             )
             model = AnthropicModel(
                 case.model_name,

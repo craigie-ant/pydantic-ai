@@ -16,6 +16,8 @@ from .conftest import try_import
 with try_import() as anthropic_imports_successful:
     from anthropic import AsyncAnthropic
 
+    from pydantic_ai.providers.anthropic import anthropic_uses_httpx2
+
 with try_import() as groq_imports_successful:
     from groq import AsyncGroq
 
@@ -164,7 +166,9 @@ def test_core_runs_without_httpx() -> None:
     assert result.stderr == ''
 
 
-@pytest.mark.skipif(not anthropic_imports_successful(), reason='anthropic not installed')
+@pytest.mark.skipif(
+    not (anthropic_imports_successful() and anthropic_uses_httpx2()), reason='anthropic is not on httpx2'
+)
 def test_anthropic_providers_run_without_httpx() -> None:
     result = subprocess.run(
         [sys.executable, '-W', 'error', '-c', _HTTPX_FREE_ANTHROPIC],
@@ -197,11 +201,15 @@ async def test_httpx2_client_constructs_without_blocking() -> None:
 
 
 @pytest.mark.skipif(not anthropic_imports_successful(), reason='anthropic not installed')
-async def test_anthropic_accepts_httpx2_client() -> None:
+async def test_anthropic_httpx2_client_matches_sdk_flavor() -> None:
+    """`anthropic>=1` is built on `httpx2` and takes an `httpx2.AsyncClient`; `anthropic<1` still rejects it."""
     async with httpx2.AsyncClient() as client:
-        anthropic_client = AsyncAnthropic(api_key='test', http_client=client)
-
-        assert anthropic_client._client is client  # pyright: ignore[reportPrivateUsage]
+        if anthropic_uses_httpx2():
+            anthropic_client = AsyncAnthropic(api_key='test', http_client=client)
+            assert anthropic_client._client is client  # pyright: ignore[reportPrivateUsage]
+        else:
+            with pytest.raises(TypeError, match=r'Expected an instance of `httpx\.AsyncClient`'):
+                AsyncAnthropic(api_key='test', http_client=client)  # pyright: ignore[reportArgumentType]
 
 
 @pytest.mark.skipif(not groq_imports_successful(), reason='groq not installed')

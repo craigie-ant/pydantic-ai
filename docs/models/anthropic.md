@@ -65,7 +65,8 @@ agent = Agent(model)
 
 ## Custom HTTP Client
 
-You can customize the `AnthropicProvider` with a custom `httpx2.AsyncClient`:
+You can customize the `AnthropicProvider` with a custom HTTP client — an `httpx2.AsyncClient` for `anthropic>=1`,
+or a legacy `httpx.AsyncClient` for `anthropic<1` (the SDK rejects the other flavor):
 
 ```python
 from httpx2 import AsyncClient
@@ -83,7 +84,7 @@ agent = Agent(model)
 ...
 ```
 
-Unlike the OpenAI-compatible providers, the Anthropic provider does not accept a legacy `httpx.AsyncClient`: the `anthropic` SDK (1.x) is built on [`httpx2`](https://httpx2.pydantic.dev/) and rejects it.
+Unlike the OpenAI-compatible providers, the Anthropic provider accepts exactly one HTTP flavor: the `anthropic` SDK rejects the other at construction, with no deprecation path.
 
 ## Model settings
 

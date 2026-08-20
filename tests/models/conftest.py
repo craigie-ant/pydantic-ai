@@ -38,6 +38,13 @@ class RequestCapture:
     client: httpx.AsyncClient = field(init=False)
     httpx2_client: httpx2.AsyncClient = field(init=False)
 
+    @property
+    def anthropic_client(self) -> httpx.AsyncClient | httpx2.AsyncClient:
+        """The capture client of the flavor the installed `anthropic` SDK accepts."""
+        from pydantic_ai.providers.anthropic import anthropic_uses_httpx2
+
+        return self.httpx2_client if anthropic_uses_httpx2() else self.client
+
     def __post_init__(self) -> None:
         self.client = httpx.AsyncClient(event_hooks={'request': [self._record]})
         self.httpx2_client = httpx2.AsyncClient(event_hooks={'request': [self._record]})
@@ -96,7 +103,7 @@ def anthropic_model(anthropic_api_key: str, request_capture: RequestCapture) -> 
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
         provider = AnthropicProvider(
-            api_key=api_key or anthropic_api_key, http_client=request_capture.httpx2_client if capture else None
+            api_key=api_key or anthropic_api_key, http_client=request_capture.anthropic_client if capture else None
         )
         return AnthropicModel(model_name, provider=provider)
 

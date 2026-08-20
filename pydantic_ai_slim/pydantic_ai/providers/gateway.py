@@ -6,7 +6,7 @@ import os
 import re
 import weakref
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import httpx2
 from typing_extensions import TypeVar
@@ -64,7 +64,7 @@ def gateway_provider(
     route: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
-    http_client: httpx2.AsyncClient | None = None,
+    http_client: AsyncHTTPClient | None = None,
 ) -> Provider[AsyncAnthropicClient]: ...
 
 
@@ -209,18 +209,20 @@ def gateway_provider(
     if canonical == 'anthropic':
         from anthropic import AsyncAnthropic
 
-        from .anthropic import AnthropicProvider
+        from .anthropic import AnthropicProvider, anthropic_uses_httpx2
 
-        def build_anthropic_provider(client: httpx2.AsyncClient) -> AnthropicProvider:
+        def build_anthropic_provider(client: AsyncHTTPClient) -> AnthropicProvider:
+            # The SDK takes exactly one HTTP flavor (httpx2 on 1.x, legacy httpx on 0.x); `client` was built
+            # by the matching factory below, or supplied by the caller for the installed SDK.
             return AnthropicProvider(
-                anthropic_client=AsyncAnthropic(auth_token=api_key, base_url=base_url, http_client=client)
+                anthropic_client=AsyncAnthropic(auth_token=api_key, base_url=base_url, http_client=client)  # pyright: ignore[reportArgumentType]
             )
 
         return _build_gateway_provider(
             build_anthropic_provider,
             api_key=api_key,
-            http_client=cast('httpx2.AsyncClient | None', http_client),
-            create_http_client=create_async_httpx2_client,
+            http_client=http_client,
+            create_http_client=create_async_httpx2_client if anthropic_uses_httpx2() else create_async_http_client,
         )
 
     if isinstance(http_client, httpx2.AsyncClient):

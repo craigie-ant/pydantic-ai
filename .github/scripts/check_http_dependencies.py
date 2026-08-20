@@ -56,14 +56,10 @@ assert any(
 
 anthropic_requirements = [requirement for requirement in slim if requirement.name == 'anthropic']
 assert len(anthropic_requirements) == 1
+# The extra spans both SDK lines: 0.x is built on legacy httpx, 1.x on httpx2.
+assert anthropic_requirements[0].specifier.contains('0.108.0')
 assert anthropic_requirements[0].specifier.contains('1.0.0')
 assert str(anthropic_requirements[0].marker) == 'extra == "anthropic"'
-
-anthropic_dependencies = [Requirement(value) for value in requires('anthropic') or []]
-assert not any(requirement.name == 'httpx' for requirement in anthropic_dependencies)
-assert any(
-    requirement.name == 'httpx2' and requirement.specifier.contains('2.0.0') for requirement in anthropic_dependencies
-)
 
 google_extras = {'google', 'google-realtime'}
 google_requirements = [requirement for requirement in slim if requirement.name == 'google-genai']

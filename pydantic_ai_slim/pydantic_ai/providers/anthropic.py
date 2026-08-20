@@ -9,6 +9,7 @@ import httpx2
 
 from pydantic_ai import ModelProfile
 from pydantic_ai._http import AsyncHTTPClient, create_async_httpx2_client
+from pydantic_ai.models import create_async_http_client
 from pydantic_ai.profiles import merge_profile
 from pydantic_ai.profiles.anthropic import AnthropicModelProfile, anthropic_model_profile
 from pydantic_ai.providers import Provider, missing_api_key_error
@@ -23,12 +24,27 @@ try:
         AsyncAnthropicBedrockMantle,  # pyright: ignore[reportPrivateImportUsage]
         AsyncAnthropicFoundry,
         AsyncAnthropicVertex,  # pyright: ignore[reportPrivateImportUsage]
+        DefaultAsyncHttpxClient,
     )
 except ImportError as _import_error:
     raise ImportError(
         'Please install the `anthropic` package to use the Anthropic provider, '
         'you can use the `anthropic` optional group — `pip install "pydantic-ai-slim[anthropic]"`'
     ) from _import_error
+
+def anthropic_uses_httpx2() -> bool:
+    """Whether the installed `anthropic` SDK is built on `httpx2` (1.x) rather than legacy `httpx` (0.x).
+
+    The SDK rejects an HTTP client of the other flavor, so everything that hands it a client or a `Timeout`
+    picks the flavor from this.
+    """
+    return issubclass(DefaultAsyncHttpxClient, httpx2.AsyncClient)
+
+
+def create_async_anthropic_http_client() -> AsyncHTTPClient:
+    """Create an HTTP client of the flavor the installed `anthropic` SDK accepts."""
+    return create_async_httpx2_client() if anthropic_uses_httpx2() else create_async_http_client()
+
 
 AsyncAnthropicClient: TypeAlias = (
     AsyncAnthropic | AsyncAnthropicBedrock | AsyncAnthropicBedrockMantle | AsyncAnthropicFoundry | AsyncAnthropicVertex
@@ -119,7 +135,7 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
 
     @overload
     def __init__(
-        self, *, api_key: str | None = None, base_url: str | None = None, http_client: httpx2.AsyncClient | None = None
+        self, *, api_key: str | None = None, base_url: str | None = None, http_client: AsyncHTTPClient | None = None
     ) -> None: ...
 
     def __init__(
@@ -128,7 +144,7 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
         api_key: str | None = None,
         base_url: str | None = None,
         anthropic_client: AsyncAnthropicClient | None = None,
-        http_client: httpx2.AsyncClient | None = None,
+        http_client: AsyncHTTPClient | None = None,
     ) -> None:
         """Create a new Anthropic provider.
 
@@ -143,7 +159,8 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
                 [`AsyncAnthropicFoundry`](https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry), or
                 [`AsyncAnthropicVertex`](https://docs.anthropic.com/en/api/claude-on-vertex-ai).
                 If provided, the `api_key` and `http_client` arguments will be ignored.
-            http_client: An existing `httpx2.AsyncClient` to use for making HTTP requests.
+            http_client: An existing HTTP client to use for making HTTP requests: an `httpx2.AsyncClient` for
+                `anthropic>=1`, or a legacy `httpx.AsyncClient` for `anthropic<1` (the SDK rejects the other flavor).
         """
         if anthropic_client is not None:
             assert http_client is None, 'Cannot provide both `anthropic_client` and `http_client`'
@@ -157,15 +174,14 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
                     ' to use the Anthropic provider.'
                 )
             if http_client is not None:
-                self._client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)
+                self._client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)  # pyright: ignore[reportArgumentType]
             else:
-                http_client = create_async_httpx2_client()
+                http_client = create_async_anthropic_http_client()
                 self._own_http_client = http_client
-                self._http_client_factory = create_async_httpx2_client
+                self._http_client_factory = create_async_anthropic_http_client
                 self._client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)
 
     def _set_http_client(self, http_client: AsyncHTTPClient) -> None:
-        assert isinstance(http_client, httpx2.AsyncClient)
         self._client._client = http_client  # pyright: ignore[reportPrivateUsage]
 
 

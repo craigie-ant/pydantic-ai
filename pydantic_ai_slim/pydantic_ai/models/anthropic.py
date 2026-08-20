@@ -78,7 +78,7 @@ from ..profiles.anthropic import (
     resolve_anthropic_effort,
 )
 from ..providers import Provider, infer_provider
-from ..providers.anthropic import AsyncAnthropicClient
+from ..providers.anthropic import AsyncAnthropicClient, anthropic_uses_httpx2
 from ..settings import ModelSettings, ThinkingLevel, merge_model_settings
 from ..tools import AgentDepsT, ToolDefinition
 from ..toolsets._tool_search import discovered_tool_names_in_order
@@ -551,8 +551,8 @@ class AnthropicModelSettings(ModelSettings, total=False):
     """
 
 
-def _normalize_anthropic_timeout(timeout: float | Timeout | NotGiven) -> float | HTTPX2Timeout | NotGiven:
-    if isinstance(timeout, Timeout):
+def _normalize_anthropic_timeout(timeout: float | Timeout | NotGiven) -> float | Timeout | HTTPX2Timeout | NotGiven:
+    if anthropic_uses_httpx2() and isinstance(timeout, Timeout):
         return HTTPX2Timeout(connect=timeout.connect, read=timeout.read, write=timeout.write, pool=timeout.pool)
     return timeout
 
