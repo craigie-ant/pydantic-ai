@@ -7,13 +7,15 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import cached_property
-from typing import Any, Literal, TypeAlias, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast, overload
 
 import pydantic_core
+from httpx2 import Timeout as HTTPX2Timeout
 from pydantic import TypeAdapter
 from typing_extensions import assert_never
 
 from .. import ModelHTTPError, UnexpectedModelBehavior, _utils, usage
+from .._http import legacy_httpx
 from .._run_context import RunContext
 from .._tool_search import _NO_MATCHES_MESSAGE  # pyright: ignore[reportPrivateUsage]
 from .._utils import guard_tool_call_id as _guard_tool_call_id, is_str_dict
@@ -146,6 +148,7 @@ try:
         AsyncAnthropicFoundry,
         AsyncAnthropicVertex,  # pyright: ignore[reportPrivateImportUsage]
         AsyncStream,
+        NotGiven,
         Omit,
         omit as OMIT,
     )
@@ -273,6 +276,13 @@ except ImportError as _import_error:
         'Please install `anthropic` to use the Anthropic model, '
         'you can use the `anthropic` optional group — `pip install "pydantic-ai-slim[anthropic]"`'
     ) from _import_error
+
+if TYPE_CHECKING:
+    from httpx import Timeout
+else:
+    # Legacy HTTPX is optional: without it `_normalize_anthropic_timeout`'s `isinstance` check falls back
+    # to the HTTPX2 type the SDK already accepts, so the conversion just rebuilds an equivalent value.
+    Timeout = legacy_httpx.Timeout if legacy_httpx is not None else HTTPX2Timeout
 
 # `AsyncAnthropicBedrockMantle` uses the Messages API and supports automatic prompt caching (unlike the
 # legacy `AsyncAnthropicBedrock` InvokeModel API), so it's not in `_NON_AUTOMATIC_CACHING_CLIENTS`. Fast
@@ -539,6 +549,12 @@ class AnthropicModelSettings(ModelSettings, total=False):
 
     See [the Anthropic docs](https://docs.anthropic.com/en/docs/build-with-claude/compaction) for more details.
     """
+
+
+def _normalize_anthropic_timeout(timeout: float | Timeout | NotGiven) -> float | HTTPX2Timeout | NotGiven:
+    if isinstance(timeout, Timeout):
+        return HTTPX2Timeout(connect=timeout.connect, read=timeout.read, write=timeout.write, pool=timeout.pool)
+    return timeout
 
 
 def _resolve_anthropic_service_tier(
@@ -835,11 +851,29 @@ class AnthropicModel(Model[AsyncAnthropicClient]):
             )
 
         prepared_settings, model_request_parameters = super().prepare_request(model_settings, model_request_parameters)
-        if profile.get('anthropic_disallows_sampling_settings', False) and prepared_settings:
+        if prepared_settings:
             filtered: ModelSettings = {**prepared_settings}
-            self._drop_unsupported_sampling_settings(filtered)
+            if profile.get('anthropic_disallows_sampling_settings', False):
+                self._drop_unsupported_sampling_settings(filtered)
+            else:
+                self._move_sampling_settings_to_extra_body(filtered)
             prepared_settings = filtered or None
         return prepared_settings, model_request_parameters
+
+    def _move_sampling_settings_to_extra_body(self, model_settings: ModelSettings) -> None:
+        """Send `temperature` / `top_p` / `top_k` through `extra_body`.
+
+        They are not typed SDK parameters, but models that predate adaptive thinking still accept them
+        on the wire.
+        """
+        sampling = {
+            setting: model_settings.pop(setting) for setting in _ANTHROPIC_SAMPLING_PARAMS if setting in model_settings
+        }
+        if not sampling:
+            return
+        extra_body = model_settings.get('extra_body')
+        # An explicit `extra_body` entry wins, as it did when the SDK merged `extra_body` over the typed params.
+        model_settings['extra_body'] = {**sampling, **(extra_body if is_str_dict(extra_body) else {})}
 
     def _drop_unsupported_sampling_settings(self, model_settings: ModelSettings) -> None:
         dropped = {setting for setting in _ANTHROPIC_SAMPLING_PARAMS if setting in model_settings}
@@ -953,10 +987,7 @@ class AnthropicModel(Model[AsyncAnthropicClient]):
                 cache_control=auto_cache_control or OMIT,
                 thinking=self._translate_thinking(model_settings, model_request_parameters),
                 stop_sequences=model_settings.get('stop_sequences', OMIT),
-                temperature=model_settings.get('temperature', OMIT),
-                top_p=model_settings.get('top_p', OMIT),
-                top_k=model_settings.get('top_k', OMIT),
-                timeout=model_settings.get('timeout', NOT_GIVEN),
+                timeout=_normalize_anthropic_timeout(model_settings.get('timeout', NOT_GIVEN)),
                 metadata=model_settings.get('anthropic_metadata', OMIT),
                 context_management=context_management or OMIT,
                 container=container or OMIT,
@@ -1201,7 +1232,7 @@ class AnthropicModel(Model[AsyncAnthropicClient]):
                     cache_control=auto_cache_control or OMIT,
                     thinking=self._translate_thinking(model_settings, model_request_parameters),
                     context_management=context_management or OMIT,
-                    timeout=model_settings.get('timeout', NOT_GIVEN),
+                    timeout=_normalize_anthropic_timeout(model_settings.get('timeout', NOT_GIVEN)),
                     speed=self._effective_speed(model_settings, anthropic_profile),
                     extra_headers=extra_headers,
                     extra_body=model_settings.get('extra_body'),
@@ -1220,7 +1251,7 @@ class AnthropicModel(Model[AsyncAnthropicClient]):
                 cache_control=auto_cache_control or OMIT,
                 thinking=self._translate_thinking(model_settings, model_request_parameters),
                 context_management=context_management or OMIT,
-                timeout=model_settings.get('timeout', NOT_GIVEN),
+                timeout=_normalize_anthropic_timeout(model_settings.get('timeout', NOT_GIVEN)),
                 speed=self._effective_speed(model_settings, anthropic_profile),
                 extra_headers=extra_headers,
                 extra_body=model_settings.get('extra_body'),

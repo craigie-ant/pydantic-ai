@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from vcr.cassette import Cassette
 
 import httpx
+import httpx2
 import pytest
 from pydantic import BaseModel, Field
 
@@ -211,7 +212,7 @@ class _BrokenClosableStream:
         return self
 
     async def __anext__(self) -> BetaRawMessageStreamEvent:
-        raise httpx.ReadError('stream closed')
+        raise httpx2.ReadError('stream closed')
 
     async def close(self) -> None:
         self.closed = True
@@ -257,7 +258,7 @@ async def test_anthropic_read_error_is_raised_when_not_cancelled():
         _enabled_server_tool_names=frozenset(),
     )
 
-    with pytest.raises(httpx.ReadError):
+    with pytest.raises(httpx2.ReadError):
         async for _event in response:
             pass
 
@@ -1557,7 +1558,23 @@ async def test_anthropic_top_k(allow_model_requests: None):
     await agent.run('hello', model_settings=ModelSettings(top_k=40))
 
     completion_kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
-    assert completion_kwargs['top_k'] == 40
+    assert 'top_k' not in completion_kwargs
+    assert completion_kwargs['extra_body'] == {'top_k': 40}
+
+
+async def test_anthropic_legacy_timeout_normalized(allow_model_requests: None):
+    """`ModelSettings.timeout` still takes a legacy `httpx.Timeout`, which the SDK's HTTPX2 client rejects,
+    so the request path converts it to an equivalent `httpx2.Timeout` before the SDK call."""
+    c = completion_message([BetaTextBlock(text='world', type='text')], BetaUsage(input_tokens=5, output_tokens=10))
+    mock_client = MockAnthropic.create_mock(c)
+    m = AnthropicModel('claude-haiku-4-5', provider=AnthropicProvider(anthropic_client=mock_client))
+    agent = Agent(m)
+
+    await agent.run('hello', model_settings=ModelSettings(timeout=httpx.Timeout(connect=1, read=2, write=3, pool=4)))
+
+    timeout = get_mock_chat_completion_kwargs(mock_client)[0]['timeout']
+    assert isinstance(timeout, httpx2.Timeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (1, 2, 3, 4)
 
 
 async def test_anthropic_betas_setting(allow_model_requests: None):
@@ -2968,7 +2985,7 @@ def test_model_status_error(allow_model_requests: None) -> None:
     mock_client = MockAnthropic.create_mock(
         APIStatusError(
             'test error',
-            response=httpx.Response(status_code=500, request=httpx.Request('POST', 'https://example.com/v1')),
+            response=httpx2.Response(status_code=500, request=httpx2.Request('POST', 'https://example.com/v1')),
             body={'error': 'test error'},
         )
     )
@@ -2985,7 +3002,7 @@ def test_model_connection_error(allow_model_requests: None) -> None:
     mock_client = MockAnthropic.create_mock(
         APIConnectionError(
             message='Connection to https://api.anthropic.com timed out',
-            request=httpx.Request('POST', 'https://api.anthropic.com/v1/messages'),
+            request=httpx2.Request('POST', 'https://api.anthropic.com/v1/messages'),
         )
     )
     m = AnthropicModel('claude-sonnet-4-5', provider=AnthropicProvider(anthropic_client=mock_client))
@@ -3000,7 +3017,7 @@ async def test_count_tokens_connection_error(allow_model_requests: None) -> None
     mock_client = MockAnthropic.create_mock(
         APIConnectionError(
             message='Connection to https://api.anthropic.com timed out',
-            request=httpx.Request('POST', 'https://api.anthropic.com/v1/messages'),
+            request=httpx2.Request('POST', 'https://api.anthropic.com/v1/messages'),
         )
     )
     m = AnthropicModel('claude-sonnet-4-5', provider=AnthropicProvider(anthropic_client=mock_client))
@@ -4728,7 +4745,8 @@ async def test_anthropic_opus_47_drops_sampling_settings(
         {'temperature': 0.2, 'top_p': 0.3, 'extra_body': {'top_k': 5, 'metadata': {'keep': True}}}
     )
     kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
-    assert (kwargs['temperature'], kwargs['top_p'], kwargs['extra_body']) == (OMIT, OMIT, {'metadata': {'keep': True}})
+    assert not {'temperature', 'top_p', 'top_k'} & kwargs.keys()
+    assert kwargs['extra_body'] == {'metadata': {'keep': True}}
 
 
 @pytest.mark.parametrize('model_name', ['claude-opus-4-7', 'claude-opus-4-8'])
@@ -4775,7 +4793,7 @@ async def test_anthropic_opus_47_keeps_non_sampling_extra_body(allow_model_reque
         await agent.run('What is 2+2?')
 
     kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
-    assert kwargs['temperature'] is OMIT
+    assert 'temperature' not in kwargs
     assert kwargs['extra_body'] == {'metadata': {'keep': True}}
 
 
@@ -9547,7 +9565,7 @@ async def test_anthropic_output_tool_with_thinking(
 ):
     m = AnthropicModel(
         'claude-sonnet-4-0',
-        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.client),
+        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.httpx2_client),
         settings=AnthropicModelSettings(anthropic_thinking={'type': 'enabled', 'budget_tokens': 3000}),
     )
 
@@ -11389,7 +11407,7 @@ async def test_anthropic_memory_tool(
 ):
     anthropic_model = AnthropicModel(
         'claude-sonnet-4-5',
-        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.client),
+        provider=AnthropicProvider(api_key=anthropic_api_key, http_client=request_capture.httpx2_client),
         settings=AnthropicModelSettings(extra_headers={'anthropic-beta': 'context-1m-2025-08-07'}),
     )
     agent = Agent(anthropic_model, capabilities=[NativeTool(MemoryTool())])
@@ -14261,7 +14279,8 @@ async def test_anthropic_top_k_propagation(allow_model_requests: None):
     await agent.run('test')
 
     kwargs = get_mock_chat_completion_kwargs(mock_client)[0]
-    assert kwargs['top_k'] == 40
+    assert 'top_k' not in kwargs
+    assert kwargs['extra_body'] == {'top_k': 40}
 
 
 async def test_anthropic_model_retrying_after_empty_response(allow_model_requests: None, anthropic_api_key: str):

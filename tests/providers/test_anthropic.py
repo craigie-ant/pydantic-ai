@@ -1,5 +1,7 @@
 from __future__ import annotations as _annotations
 
+import httpx
+import httpx2
 import pytest
 
 from ..conftest import TestEnv, try_import
@@ -13,15 +15,39 @@ with try_import() as imports_successful:
     from pydantic_ai.providers.anthropic import AnthropicProvider
 
 
-pytestmark = pytest.mark.skipif(not imports_successful(), reason='need to install anthropic')
+pytestmark = [
+    pytest.mark.skipif(not imports_successful(), reason='need to install anthropic'),
+    pytest.mark.anyio,
+]
 
 
-def test_anthropic_provider():
+async def test_anthropic_provider():
     provider = AnthropicProvider(api_key='api-key')
     assert provider.name == 'anthropic'
     assert provider.base_url == 'https://api.anthropic.com'
     assert isinstance(provider.client, AsyncAnthropic)
     assert provider.client.api_key == 'api-key'
+    assert isinstance(provider.client._client, httpx2.AsyncClient)  # pyright: ignore[reportPrivateUsage]
+    async with provider:
+        pass
+    assert provider.client._client.is_closed  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_anthropic_provider_pass_httpx2_client() -> None:
+    async with httpx2.AsyncClient() as http_client:
+        provider = AnthropicProvider(http_client=http_client, api_key='api-key')
+        assert provider.client._client is http_client  # pyright: ignore[reportPrivateUsage]
+        async with provider:
+            pass
+        assert not http_client.is_closed
+
+
+async def test_anthropic_provider_rejects_legacy_httpx_client() -> None:
+    # Unlike the OpenAI SDK, `anthropic>=1` has no runtime escape hatch for a legacy client, so there is
+    # no deprecation path to offer: the SDK itself refuses it at construction.
+    async with httpx.AsyncClient() as http_client:
+        with pytest.raises(TypeError, match=r'Expected an instance of `httpx2\.AsyncClient`'):
+            AnthropicProvider(http_client=http_client, api_key='api-key')  # pyright: ignore[reportArgumentType]
 
 
 def test_anthropic_provider_without_api_key_raises_error(env: TestEnv):
