@@ -269,7 +269,7 @@ The retry transports work with any provider whose `http_client` argument accepts
 [provider's docs](overview.md) for the client type it takes; [Bedrock](#aws-bedrock) uses boto3 and configures retries
 its own way.
 
-Providers whose SDKs still require a legacy `httpx.AsyncClient` (such as Anthropic, Groq, and Cohere) can use the
+Providers whose SDKs still require a legacy `httpx.AsyncClient` (such as Groq and Cohere) can use the
 deprecated [`TenacityTransport`][pydantic_ai.retries.TenacityTransport] and
 [`AsyncTenacityTransport`][pydantic_ai.retries.AsyncTenacityTransport] on that client during Pydantic AI v2; both are
 removed in v3 together with legacy client support.

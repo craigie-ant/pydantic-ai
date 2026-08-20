@@ -43,7 +43,7 @@ agent = Agent(model)
 ```
 
 !!! note "Claude Opus 4.7 / 4.8 / 5 migration"
-    Anthropic's [Claude Opus migration guide](https://platform.claude.com/docs/en/about-claude/models/migration-guide) recommends removing `temperature`, `top_p`, and `top_k` from Opus 4.7, 4.8, and 5 requests. Pydantic AI drops those keys automatically for `claude-opus-4-7`, `claude-opus-4-8`, and `claude-opus-5`, including `extra_body` overrides.
+    Anthropic's [Claude Opus migration guide](https://platform.claude.com/docs/en/about-claude/models/migration-guide) recommends removing `temperature`, `top_p`, and `top_k` from Opus 4.7, 4.8, and 5 requests. Pydantic AI drops those keys automatically for `claude-opus-4-7`, `claude-opus-4-8`, and `claude-opus-5`, including `extra_body` overrides. For earlier models, which still accept them, the `anthropic` SDK (v1+) no longer exposes them as typed parameters, so Pydantic AI sends them through the request body (`extra_body`) instead.
 
     The same guide also recommends re-evaluating `max_tokens` and any token-count assumptions when migrating from Opus 4.6, since Opus 4.7 introduced updated tokenization (carried into 4.8). If you rely on `count_tokens()` or `count_tokens_before_request`, verify your thresholds against the new model.
 
@@ -65,10 +65,10 @@ agent = Agent(model)
 
 ## Custom HTTP Client
 
-You can customize the `AnthropicProvider` with a custom `httpx.AsyncClient`:
+You can customize the `AnthropicProvider` with a custom `httpx2.AsyncClient`:
 
 ```python
-from httpx import AsyncClient
+from httpx2 import AsyncClient
 
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -82,6 +82,8 @@ model = AnthropicModel(
 agent = Agent(model)
 ...
 ```
+
+Unlike the OpenAI-compatible providers, the Anthropic provider does not accept a legacy `httpx.AsyncClient`: the `anthropic` SDK (1.x) is built on [`httpx2`](https://httpx2.pydantic.dev/) and rejects it.
 
 ## Model settings
 
